@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 粒子变形效果</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000000;
+            color: #ffffff;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        canvas {
+            display: block;
+        }
+        #ui-container {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+        #change-shape-btn {
+            padding: 12px 24px;
+            font-size: 16px;
+            background-color: #0055ff;
+            color: white;
+            border: 2px solid #ffffff;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: inherit;
+            box-shadow: 0 0 15px rgba(0, 85, 255, 0.7);
+            transition: background-color 0.3s, box-shadow 0.3s;
+        }
+        #change-shape-btn:hover {
+            background-color: #0033aa;
+            box-shadow: 0 0 25px rgba(0, 85, 255, 1);
+        }
+        #color-picker {
+            display: flex;
+            gap: 10px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50px;
+            backdrop-filter: blur(5px);
+        }
+        .color-dot {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .color-dot:hover {
+            transform: scale(1.1);
+        }
+        .color-dot.active {
+            border-color: #fff;
+        }
+        #info-text {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 8px 16px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info-text">Shape: Sphere (Click to morph)</div>
+    <div id="ui-container">
+        <button id="change-shape-btn">Change Shape</button>
+        <div id="color-picker">
+            <div class="color-dot active" style="background: radial-gradient(circle, #ffd700, #ff8c00);" data-color="#ffd700"></div>
+            <div class="color-dot" style="background: radial-gradient(circle, #da70d6, #8a2be2);" data-color="#da70d6"></div>
+            <div class="color-dot" style="background: radial-gradient(circle, #adff2f, #008000);" data-color="#adff2f"></div>
+            <div class="color-dot" style="background: linear-gradient(45deg, #ff00ff, #00ffff);" data-color="rainbow"></div>
+        </div>
+    </div>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/",
+                "gsap": "https://unpkg.com/gsap@3.12.5/index.js"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { gsap } from 'gsap';
+
+        // --- 基本设置 ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 150;
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.5;
+
+        // --- UI 元素 ---
+        const changeShapeBtn = document.getElementById('change-shape-btn');
+        const infoText = document.getElementById('info-text');
+        const colorDots = document.querySelectorAll('.color-dot');
+        
+        // --- 粒子设置 ---
+        const PARTICLE_COUNT = 20000;
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(PARTICLE_COUNT * 3);
+        const colors = new Float32Array(PARTICLE_COUNT * 3);
+
+        const color = new THREE.Color();
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+            positions[i * 3] = (Math.random() - 0.5) * 200;
+            positions[i * 3 + 1] = (Math.random() - 0.5) * 200;
+            positions[i * 3 + 2] = (Math.random() - 0.5) * 200;
+        }
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        // 创建粒子纹理
+        const createParticleTexture = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 32;
+            canvas.height = 32;
+            const context = canvas.getContext('2d');
+            const gradient = context.createRadialGradient(16, 16, 0, 16, 16, 16);
+            gradient.addColorStop(0, 'rgba(255,255,255,1)');
+            gradient.addColorStop(0.2, 'rgba(255,255,255,0.8)');
+            gradient.addColorStop(1, 'rgba(255,255,255,0)');
+            context.fillStyle = gradient;
+            context.fillRect(0, 0, 32, 32);
+            return new THREE.CanvasTexture(canvas);
+        };
+        
+        const material = new THREE.PointsMaterial({
+            size: 1.5,
+            map: createParticleTexture(),
+            vertexColors: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            transparent: true,
+        });
+
+        const points = new THREE.Points(geometry, material);
+        scene.add(points);
+        
+        // --- 星空背景 ---
+        const starGeometry = new THREE.BufferGeometry();
+        const starPositions = new Float32Array(5000 * 3);
+        for (let i = 0; i < 5000; i++) {
+            starPositions[i*3] = (Math.random() - 0.5) * 1000;
+            starPositions[i*3+1] = (Math.random() - 0.5) * 1000;
+            starPositions[i*3+2] = (Math.random() - 0.5) * 1000;
+        }
+        starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.2 });
+        const stars = new THREE.Points(starGeometry, starMaterial);
+        scene.add(stars);
+
+        // --- 形状位置生成函数 ---
+        const shapeGenerators = {
+            Sphere: (count, radius) => {
+                const arr = new Float32Array(count * 3);
+                for (let i = 0; i < count; i++) {
+                    const phi = Math.acos(-1 + (2 * i) / count);
+                    const theta = Math.sqrt(count * Math.PI) * phi;
+                    arr[i * 3] = radius * Math.cos(theta) * Math.sin(phi);
+                    arr[i * 3 + 1] = radius * Math.sin(theta) * Math.sin(phi);
+                    arr[i * 3 + 2] = radius * Math.cos(phi);
+                }
+                return arr;
+            },
+            Cube: (count, size) => {
+                const arr = new Float32Array(count * 3);
+                const half = size / 2;
+                for (let i = 0; i < count; i++) {
+                    const face = Math.floor(Math.random() * 6);
+                    let x = Math.random() * size - half;
+                    let y = Math.random() * size - half;
+                    let z = Math.random() * size - half;
+                    if (face === 0) x = half; if (face === 1) x = -half;
+                    if (face === 2) y = half; if (face === 3) y = -half;
+                    if (face === 4) z = half; if (face === 5) z = -half;
+                    arr[i * 3] = x; arr[i * 3 + 1] = y; arr[i * 3 + 2] = z;
+                }
+                return arr;
+            },
+            Pyramid: (count, size) => {
+                 const arr = new Float32Array(count * 3);
+                 const half = size / 2;
+                 for (let i = 0; i < count; i++) {
+                    const y = Math.random() * size;
+                    const ratio = 1 - (y / size);
+                    const x = (Math.random() - 0.5) * size * ratio;
+                    const z = (Math.random() - 0.5) * size * ratio;
+                    arr[i*3] = x; arr[i*3+1] = y - half; arr[i*3+2] = z;
+                }
+                return arr;
+            },
+            Torus: (count, radius, tube) => {
+                const arr = new Float32Array(count * 3);
+                for (let i = 0; i < count; i++) {
+                    const u = Math.random() * 2 * Math.PI;
+                    const v = Math.random() * 2 * Math.PI;
+                    arr[i * 3] = (radius + tube * Math.cos(v)) * Math.cos(u);
+                    arr[i * 3 + 1] = (radius + tube * Math.cos(v)) * Math.sin(u);
+                    arr[i * 3 + 2] = tube * Math.sin(v);
+                }
+                return arr;
+            },
+            Galaxy: (count, radius) => {
+                const arr = new Float32Array(count * 3);
+                const branches = 3;
+                for (let i = 0; i < count; i++) {
+                    const r = Math.random() * radius;
+                    const spinAngle = r * 2.5;
+                    const branchAngle = (i % branches) / branches * 2 * Math.PI;
+
+                    const randomX = Math.pow(Math.random(), 3) * (Math.random() < 0.5 ? 1 : -1) * 5;
+                    const randomY = Math.pow(Math.random(), 3) * (Math.random() < 0.5 ? 1 : -1) * 2;
+                    const randomZ = Math.pow(Math.random(), 3) * (Math.random() < 0.5 ? 1 : -1) * 5;
+
+                    arr[i * 3] = Math.cos(branchAngle + spinAngle) * r + randomX;
+                    arr[i * 3 + 1] = randomY;
+                    arr[i * 3 + 2] = Math.sin(branchAngle + spinAngle) * r + randomZ;
+                }
+                return arr;
+            },
+             Wave: (count, size) => {
+                const arr = new Float32Array(count * 3);
+                const half = size / 2;
+                for(let i = 0; i < count; i++) {
+                    const x = Math.random() * size - half;
+                    const z = Math.random() * size - half;
+                    const d = Math.sqrt(x * x + z * z);
+                    const y = Math.sin(d * 0.2) * 10;
+                    arr[i*3] = x; arr[i*3+1] = y; arr[i*3+2] = z;
+                }
+                return arr;
+            }
+        };
+
+        const shapes = [
+            { name: 'Sphere', generator: () => shapeGenerators.Sphere(PARTICLE_COUNT, 80) },
+            { name: 'Cube', generator: () => shapeGenerators.Cube(PARTICLE_COUNT, 100) },
+            { name: 'Pyramid', generator: () => shapeGenerators.Pyramid(PARTICLE_COUNT, 100) },
+            { name: 'Torus', generator: () => shapeGenerators.Torus(PARTICLE_COUNT, 60, 20) },
+            { name: 'Galaxy', generator: () => shapeGenerators.Galaxy(PARTICLE_COUNT, 80) },
+            { name: 'Wave', generator: () => shapeGenerators.Wave(PARTICLE_COUNT, 120) },
+        ];
+        
+        let currentShapeIndex = 0;
+        let isMorphing = false;
+        const targetPositions = {};
+        for (const shape of shapes) {
+            targetPositions[shape.name] = shape.generator();
+        }
+
+        // --- 变形动画逻辑 ---
+        const morphToShape = (index) => {
+            if (isMorphing) return;
+            isMorphing = true;
+            changeShapeBtn.disabled = true;
+
+            const targetShape = shapes[index];
+            const targetPosArray = targetPositions[targetShape.name];
+            const currentPos = geometry.attributes.position;
+
+            infoText.textContent = 'Morphing...';
+            controls.autoRotate = false;
+            
+            gsap.to(currentPos.array, {
+                duration: 2,
+                endArray: targetPosArray,
+                ease: 'power3.inOut',
+                onUpdate: () => {
+                    currentPos.needsUpdate = true;
+                },
+                onComplete: () => {
+                    isMorphing = false;
+                    changeShapeBtn.disabled = false;
+                    infoText.textContent = `Shape: ${targetShape.name} (Click to morph)`;
+                    controls.autoRotate = true;
+                }
+            });
+        };
+
+        // --- 颜色更新逻辑 ---
+        const updateColors = (baseColor) => {
+            const colorAttribute = geometry.attributes.color;
+            if (baseColor === 'rainbow') {
+                for (let i = 0; i < PARTICLE_COUNT; i++) {
+                    const hue = (i / PARTICLE_COUNT);
+                    color.setHSL(hue, 1.0, 0.5);
+                    colorAttribute.setXYZ(i, color.r, color.g, color.b);
+                }
+            } else {
+                color.set(baseColor);
+                 for (let i = 0; i < PARTICLE_COUNT; i++) {
+                    colorAttribute.setXYZ(i, color.r, color.g, color.b);
+                }
+            }
+            colorAttribute.needsUpdate = true;
+        };
+
+        // --- 事件监听 ---
+        changeShapeBtn.addEventListener('click', () => {
+            currentShapeIndex = (currentShapeIndex + 1) % shapes.length;
+            morphToShape(currentShapeIndex);
+        });
+
+        colorDots.forEach(dot => {
+            dot.addEventListener('click', () => {
+                if (isMorphing) return;
+                colorDots.forEach(d => d.classList.remove('active'));
+                dot.classList.add('active');
+                const newColor = dot.dataset.color;
+                updateColors(newColor);
+            });
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- 动画循环 ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // --- 初始状态 ---
+        morphToShape(0);
+        updateColors(colorDots[0].dataset.color);
+        animate();
+    </script>
+</body>
+</html>
